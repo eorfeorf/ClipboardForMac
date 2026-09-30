@@ -18,7 +18,7 @@ macOS 14 以降の Apple Silicon と Intel の Mac に対応します。ライ�
 | 保存と自動起動 | 履歴は各 Mac に保存され、再起動後も残ります。ログイン時にアプリを起動する設定もあります。 |
 | 秘匿データの除外 | パスワード管理アプリなどが「秘匿」または「一時」と指定したコピー内容は記録しません。 |
 
-## 別のMacで使う
+## 導入方法
 
 1. [Releases](https://github.com/eorfeorf/ClipboardForMac/releases) から最新の `ClipboardForMac-v*-macOS-universal.zip` をダウンロードして展開します。
 2. `ClipboardForMac.app` を「アプリケーション」フォルダーへ移動して開きます。
