@@ -12,7 +12,7 @@ jobs:
   macos:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Test
         run: swift test
       - name: Package universal app
@@ -23,7 +23,7 @@ jobs:
           codesign --verify --deep --strict dist/ClipboardForMac.app
           cd dist
           shasum -a 256 -c ClipboardForMac-*.zip.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ClipboardForMac-macOS-universal
           path: |
