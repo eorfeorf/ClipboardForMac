@@ -102,6 +102,31 @@ final class ClipboardManagerTests: XCTestCase {
         XCTAssertNotNil(NSImage(pasteboard: board))
     }
 
+    func testSavedScreenshotIsCopiedAndRecordedWithoutDeletingTheOriginal() throws {
+        let (manager, board, directory) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = NSImage(size: NSSize(width: 10, height: 10))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: 10, height: 10).fill()
+        image.unlockFocus()
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let screenshot = ScreenshotStorage.newCaptureURL(in: directory)
+        try png.write(to: screenshot)
+
+        manager.useSavedScreenshot(at: screenshot)
+
+        XCTAssertNotNil(NSImage(pasteboard: board))
+        XCTAssertEqual(manager.entries.first?.kind, .image)
+        let historyCopy = directory.appendingPathComponent(try XCTUnwrap(manager.entries.first?.imageFilename))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: historyCopy.path))
+        manager.clearUnpinned()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyCopy.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: screenshot.path))
+    }
+
     func testRichTextRoundTrip() throws {
         let (manager, board, directory) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: directory) }

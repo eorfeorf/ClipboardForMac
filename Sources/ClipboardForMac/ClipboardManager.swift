@@ -226,6 +226,21 @@ final class ClipboardManager: ObservableObject {
         addEntry(kind: .files, payload: url.absoluteString, fileURLs: [url.absoluteString])
     }
 
+    @discardableResult
+    func useSavedScreenshot(at url: URL) -> Bool {
+        guard let image = NSImage(contentsOf: url) else {
+            errorMessage = "保存したスクリーンショットを読み込めませんでした。"
+            return false
+        }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([image]) else {
+            errorMessage = "スクリーンショットをクリップボードにコピーできませんでした。"
+            return false
+        }
+        captureCurrentClipboard()
+        return true
+    }
+
     nonisolated private static func pngData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
@@ -313,7 +328,9 @@ final class ClipboardManager: ObservableObject {
     private func cleanUnusedAssets() {
         let keep = Set(entries.compactMap(\.imageFilename) + entries.compactMap(\.richTextFilename))
         guard let files = try? FileManager.default.contentsOfDirectory(at: storageDirectory, includingPropertiesForKeys: nil) else { return }
-        for file in files where ["png", "plist"].contains(file.pathExtension) && !keep.contains(file.lastPathComponent) {
+        for file in files where ["png", "plist"].contains(file.pathExtension)
+            && UUID(uuidString: file.deletingPathExtension().lastPathComponent) != nil
+            && !keep.contains(file.lastPathComponent) {
             try? FileManager.default.removeItem(at: file)
         }
     }

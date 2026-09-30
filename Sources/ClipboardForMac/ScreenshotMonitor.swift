@@ -26,7 +26,7 @@ final class ScreenshotMonitor {
     private var reportedAccessError: URL?
 
     init(
-        directoryProvider: @escaping @MainActor () -> URL? = ScreenshotMonitor.defaultDirectory,
+        directoryProvider: @escaping @MainActor () -> URL? = ScreenshotStorage.destinationDirectory,
         nameProvider: @escaping @MainActor () -> [String] = ScreenshotMonitor.screenshotNames,
         onAccessError: @escaping @MainActor (URL) -> Void = { _ in },
         onScreenshot: @escaping @MainActor (URL) async -> Bool
@@ -178,17 +178,6 @@ final class ScreenshotMonitor {
             guard basename.range(of: prefix, options: [.anchored, .caseInsensitive]) != nil else { return false }
             return basename.dropFirst(prefix.count).first?.isNumber == true
         }
-    }
-
-    private static func defaultDirectory() -> URL? {
-        if let raw = CFPreferencesCopyAppValue("location" as CFString, "com.apple.screencapture" as CFString) as? String,
-           !raw.isEmpty {
-            if raw.hasPrefix("file://"), let url = URL(string: raw), url.isFileURL { return url }
-            if raw.hasPrefix("/") || raw.hasPrefix("~") {
-                return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
-            }
-        }
-        return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
     }
 
     private static func screenshotNames() -> [String] {

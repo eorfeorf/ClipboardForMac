@@ -220,33 +220,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startScreenshot(screen: NSScreen, region: CGRect) {
         guard let rectangle = CaptureGeometry.screenshotRectangle(screen: screen, region: region) else {
-            manager.errorMessage = "撮影する画面を確認できませんでした。"
+            showScreenshotError("撮影する画面を確認できませんでした。")
             return
         }
-        runScreenshot(arguments: ["-R", rectangle, "-c"])
+        runScreenshot(arguments: ["-R", rectangle])
     }
 
     private func startScreenshot(_ mode: CaptureMode) {
         let arguments: [String]
         switch mode {
-        case .region: arguments = ["-i", "-s", "-c"]
-        case .window: arguments = ["-i", "-w", "-c"]
+        case .region: arguments = ["-i", "-s"]
+        case .window: arguments = ["-i", "-w"]
         case .display:
             let screenIndex = NSScreen.screens.firstIndex(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? 0
-            arguments = ["-c", "-D", String(screenIndex + 1)]
+            arguments = ["-D", String(screenIndex + 1)]
         }
         runScreenshot(arguments: arguments)
     }
 
     private func runScreenshot(arguments: [String]) {
         guard screenshotProcess == nil else { return }
+        guard let directory = ScreenshotStorage.destinationDirectory(),
+              (try? directory.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else {
+            showScreenshotError("スクリーンショットの保存先フォルダーが見つかりません。")
+            return
+        }
+        let outputURL = ScreenshotStorage.newCaptureURL(in: directory)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = arguments
-        process.terminationHandler = { [weak self] _ in
+        process.arguments = arguments + ["-t", "png", outputURL.path]
+        process.terminationHandler = { [weak self] finished in
             Task { @MainActor [weak self] in
-                self?.screenshotProcess = nil
-                self?.manager.captureCurrentClipboard()
+                guard let self else { return }
+                self.screenshotProcess = nil
+                if finished.terminationStatus == 0 && FileManager.default.fileExists(atPath: outputURL.path) {
+                    if !self.manager.useSavedScreenshot(at: outputURL) {
+                        self.showScreenshotError(self.manager.errorMessage ?? "スクリーンショットを読み込めませんでした。")
+                    }
+                } else {
+                    if finished.terminationStatus != 0 { try? FileManager.default.removeItem(at: outputURL) }
+                    if !arguments.contains("-i") {
+                        self.showScreenshotError("スクリーンショットを保存できませんでした。")
+                    }
+                }
             }
         }
         screenshotProcess = process
@@ -254,8 +270,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try process.run()
         } catch {
             screenshotProcess = nil
-            manager.errorMessage = "スクリーンショットを開始できませんでした。"
+            showScreenshotError("スクリーンショットを開始できませんでした。")
         }
+    }
+
+    private func showScreenshotError(_ message: String) {
+        manager.errorMessage = message
+        if panel?.isVisible != true { togglePanel() }
     }
 
     private func createStatusItem() {
