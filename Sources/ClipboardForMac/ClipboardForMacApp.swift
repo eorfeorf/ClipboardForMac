@@ -39,6 +39,7 @@ private final class FloatingClipboardPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let manager = ClipboardManager()
+    private let screenshotPreferences = ScreenshotPreferences()
     private var screenshotMonitor: ScreenshotMonitor?
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
@@ -153,7 +154,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         manager.selectedID = nil
         manager.refreshPermissions()
         let panel = makePanel()
-        panel.contentView = NSHostingView(rootView: HistoryView(manager: manager))
+        panel.contentView = NSHostingView(rootView: HistoryView(
+            manager: manager,
+            screenshotPreferences: screenshotPreferences,
+            chooseScreenshotFolder: { [weak self] in self?.chooseScreenshotFolder() }
+        ))
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate()
@@ -240,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runScreenshot(arguments: [String]) {
         guard screenshotProcess == nil else { return }
-        guard let directory = ScreenshotStorage.destinationDirectory(),
+        guard let directory = screenshotPreferences.destinationDirectory,
               (try? directory.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else {
             showScreenshotError("スクリーンショットの保存先フォルダーが見つかりません。")
             return
@@ -277,6 +282,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showScreenshotError(_ message: String) {
         manager.errorMessage = message
         if panel?.isVisible != true { togglePanel() }
+    }
+
+    private func chooseScreenshotFolder() {
+        let picker = NSOpenPanel()
+        picker.canChooseFiles = false
+        picker.canChooseDirectories = true
+        picker.allowsMultipleSelection = false
+        picker.prompt = "保存先に設定"
+        picker.message = "スクリーンショットの保存先フォルダーを選択してください。"
+        picker.directoryURL = screenshotPreferences.destinationDirectory
+        NSApp.activate()
+        picker.begin { [weak self] response in
+            Task { @MainActor [weak self] in
+                guard response == .OK, let directory = picker.url else { return }
+                self?.screenshotPreferences.useCustomDirectory(directory)
+            }
+        }
     }
 
     private func createStatusItem() {

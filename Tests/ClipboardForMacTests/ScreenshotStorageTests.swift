@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import ClipboardForMac
 
+@MainActor
 final class ScreenshotStorageTests: XCTestCase {
     func testConfiguredScreenshotDirectoryAndDesktopFallback() {
         let desktop = URL(fileURLWithPath: "/tmp/Desktop", isDirectory: true)
@@ -23,5 +24,26 @@ final class ScreenshotStorageTests: XCTestCase {
         XCTAssertTrue(first.lastPathComponent.hasPrefix("ClipboardForMac "))
         XCTAssertEqual(first.pathExtension, "png")
         XCTAssertNotEqual(first, second)
+    }
+
+    func testSaveLocationChoicePersists() throws {
+        let suiteName = "ClipboardForMacTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let custom = URL(fileURLWithPath: "/tmp/My Captures", isDirectory: true)
+
+        let preferences = ScreenshotPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.location, .system)
+
+        preferences.use(.desktop)
+        XCTAssertEqual(ScreenshotPreferences(defaults: defaults).location, .desktop)
+
+        preferences.useCustomDirectory(custom)
+        let reloaded = ScreenshotPreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.location, .custom)
+        XCTAssertEqual(reloaded.destinationDirectory, custom)
+
+        reloaded.use(.system)
+        XCTAssertEqual(ScreenshotPreferences(defaults: defaults).location, .system)
     }
 }

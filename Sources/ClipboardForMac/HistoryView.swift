@@ -3,6 +3,8 @@ import SwiftUI
 
 struct HistoryView: View {
     @ObservedObject var manager: ClipboardManager
+    @ObservedObject var screenshotPreferences: ScreenshotPreferences
+    let chooseScreenshotFolder: () -> Void
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -207,6 +209,16 @@ struct HistoryView: View {
             Menu {
                 Button("画面を撮影・録画（⌥⇧S）") { manager.onScreenshotRequest?() }
                 Divider()
+                Menu("設定") {
+                    screenshotLocationButton(.system, title: "スクリーンショット：macOSと同じ")
+                    screenshotLocationButton(.desktop, title: "スクリーンショット：デスクトップ")
+                    if let folder = screenshotPreferences.customDirectory {
+                        screenshotLocationButton(.custom, title: "スクリーンショット：\(folder.lastPathComponent)")
+                    }
+                    Divider()
+                    Button("保存先フォルダーを選択…", action: chooseScreenshotFolder)
+                }
+                Divider()
                 Toggle("ログイン時に起動", isOn: Binding(
                     get: { manager.launchAtLogin },
                     set: { manager.setLaunchAtLogin($0) }
@@ -227,5 +239,17 @@ struct HistoryView: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 40)
+    }
+
+    private func screenshotLocationButton(_ location: ScreenshotSaveLocation, title: String) -> some View {
+        Button {
+            screenshotPreferences.use(location)
+        } label: {
+            if screenshotPreferences.location == location {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 }
