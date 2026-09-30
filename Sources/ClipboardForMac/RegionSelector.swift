@@ -23,6 +23,7 @@ final class RegionSelector {
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = false
+            panel.hidesOnDeactivate = false
             panel.ignoresMouseEvents = false
             let view = RegionSelectionView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.onSelect = { [weak self] rect in

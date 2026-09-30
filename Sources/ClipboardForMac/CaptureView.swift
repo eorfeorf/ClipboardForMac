@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum CaptureKind: String, CaseIterable {
@@ -19,19 +20,34 @@ enum CaptureMode: String, CaseIterable {
     }
 }
 
+enum CaptureGeometry {
+    static func screenshotRectangle(screen: NSScreen, region: CGRect) -> String? {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return nil
+        }
+        let displayBounds = CGDisplayBounds(number.uint32Value)
+        return [displayBounds.minX + region.minX,
+                displayBounds.minY + screen.frame.height - region.maxY,
+                region.width, region.height]
+            .map { String(Int($0.rounded())) }
+            .joined(separator: ",")
+    }
+}
+
 struct CaptureView: View {
-    let capture: (CaptureKind, CaptureMode) -> Void
+    let select: (CaptureKind, CaptureMode) -> Void
     let cancel: () -> Void
 
     @State private var kind: CaptureKind = .image
     @State private var mode: CaptureMode = .region
 
     var body: some View {
-        VStack(spacing: 11) {
+        VStack(spacing: 8) {
             HStack(spacing: 6) {
                 ForEach(CaptureKind.allCases, id: \.self) { option in
                     Button {
                         kind = option
+                        select(kind, mode)
                     } label: {
                         Label(option.rawValue, systemImage: option == .image ? "camera" : "video")
                             .frame(maxWidth: .infinity)
@@ -42,11 +58,19 @@ struct CaptureView: View {
                                 in: RoundedRectangle(cornerRadius: 7))
                     .accessibilityAddTraits(kind == option ? .isSelected : [])
                 }
+                Button(action: cancel) {
+                    Image(systemName: "xmark")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("キャンセル")
             }
             HStack(spacing: 5) {
                 ForEach(CaptureMode.allCases, id: \.self) { option in
                     Button {
                         mode = option
+                        select(kind, mode)
                     } label: {
                         Label(option.rawValue, systemImage: option.symbol)
                             .font(.system(size: 12))
@@ -59,18 +83,9 @@ struct CaptureView: View {
                     .accessibilityAddTraits(mode == option ? .isSelected : [])
                 }
             }
-            HStack {
-                Spacer()
-                Button("キャンセル", action: cancel)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                Button("撮影") { capture(kind, mode) }
-                    .keyboardShortcut(.return)
-                    .buttonStyle(.borderedProminent)
-            }
         }
-        .padding(12)
-        .frame(width: 354, height: 142)
+        .padding(10)
+        .frame(width: 354, height: 100)
         .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
     }
 }

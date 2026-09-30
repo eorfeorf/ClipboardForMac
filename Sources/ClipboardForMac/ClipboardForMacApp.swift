@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeyEventHandler: EventHandlerRef?
     private var screenshotProcess: Process?
     private var capturePanel: NSPanel?
+    private var captureKind: CaptureKind = .image
     private let regionSelector = RegionSelector()
     private let recorder = ScreenRecorder()
     private var keyboardMonitor: Any?
@@ -139,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func togglePanel() {
+        if capturePanel?.isVisible == true || regionSelector.isSelecting { closeCapture() }
         if panel?.isVisible == true {
             closePanel(restoreFocus: true)
             return
@@ -160,48 +162,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func toggleCapture() {
         if recorder.isRecording { recorder.stop(); return }
         if recorder.isFinishing { return }
-        if regionSelector.isSelecting { regionSelector.cancel(); return }
-        if capturePanel?.isVisible == true {
-            capturePanel?.orderOut(nil)
+        if capturePanel?.isVisible == true || regionSelector.isSelecting {
+            closeCapture()
             return
         }
         panel?.orderOut(nil)
+        captureKind = .image
         let capturePanel = makeCapturePanel()
         capturePanel.contentView = NSHostingView(rootView: CaptureView(
-            capture: { [weak self] kind, mode in self?.beginCapture(kind: kind, mode: mode) },
-            cancel: { [weak self] in self?.capturePanel?.orderOut(nil) }
+            select: { [weak self] kind, mode in self?.selectCapture(kind: kind, mode: mode) },
+            cancel: { [weak self] in self?.closeCapture() }
         ))
-        capturePanel.center()
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
+        if let screen {
+            capturePanel.setFrameOrigin(NSPoint(x: screen.frame.midX - capturePanel.frame.width / 2,
+                                               y: screen.visibleFrame.maxY - capturePanel.frame.height - 12))
+        }
         capturePanel.makeKeyAndOrderFront(nil)
         NSApp.activate()
+        beginRegionSelection()
     }
 
-    private func beginCapture(kind: CaptureKind, mode: CaptureMode) {
-        capturePanel?.orderOut(nil)
+    private func selectCapture(kind: CaptureKind, mode: CaptureMode) {
+        captureKind = kind
+        guard mode != .region else { return }
+        closeCapture()
         if kind == .video {
-            if mode == .region {
-                regionSelector.begin { [weak self] screen, region in
-                    self?.recorder.record(screen: screen, region: region)
-                }
-            } else {
-                recorder.pick(mode)
-            }
+            recorder.pick(mode)
             return
         }
-        startScreenshot(mode)
+        if mode == .display {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.startScreenshot(mode) }
+        } else {
+            startScreenshot(mode)
+        }
+    }
+
+    private func beginRegionSelection() {
+        regionSelector.begin { [weak self] screen, region in
+            guard let self else { return }
+            let kind = self.captureKind
+            self.closeCapture()
+            if kind == .video {
+                self.recorder.record(screen: screen, region: region)
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    self?.startScreenshot(screen: screen, region: region)
+                }
+            }
+        }
+    }
+
+    private func closeCapture() {
+        regionSelector.cancel()
+        capturePanel?.orderOut(nil)
+    }
+
+    private func startScreenshot(screen: NSScreen, region: CGRect) {
+        guard let rectangle = CaptureGeometry.screenshotRectangle(screen: screen, region: region) else {
+            manager.errorMessage = "撮影する画面を確認できませんでした。"
+            return
+        }
+        runScreenshot(arguments: ["-R", rectangle, "-c"])
     }
 
     private func startScreenshot(_ mode: CaptureMode) {
+        let arguments: [String]
+        switch mode {
+        case .region: arguments = ["-i", "-s", "-c"]
+        case .window: arguments = ["-i", "-w", "-c"]
+        case .display:
+            let screenIndex = NSScreen.screens.firstIndex(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? 0
+            arguments = ["-c", "-D", String(screenIndex + 1)]
+        }
+        runScreenshot(arguments: arguments)
+    }
+
+    private func runScreenshot(arguments: [String]) {
         guard screenshotProcess == nil else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        switch mode {
-        case .region: process.arguments = ["-i", "-s", "-c"]
-        case .window: process.arguments = ["-i", "-w", "-c"]
-        case .display:
-            let screenIndex = NSScreen.screens.firstIndex(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? 0
-            process.arguments = ["-c", "-D", String(screenIndex + 1)]
-        }
+        process.arguments = arguments
         process.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.screenshotProcess = nil
@@ -252,15 +293,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeCapturePanel() -> NSPanel {
         if let capturePanel { return capturePanel }
         let created = FloatingClipboardPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 354, height: 142),
+            contentRect: NSRect(x: 0, y: 0, width: 354, height: 100),
             styleMask: [.borderless], backing: .buffered, defer: false
         )
         created.backgroundColor = .clear
         created.isOpaque = false
         created.hasShadow = true
         created.isFloatingPanel = true
-        created.hidesOnDeactivate = true
-        created.level = .floating
+        created.hidesOnDeactivate = false
+        created.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         capturePanel = created
         return created
@@ -299,12 +340,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if self.regionSelector.isSelecting, Int(event.keyCode) == kVK_Escape {
-                self.regionSelector.cancel()
+                self.closeCapture()
                 return nil
             }
             if self.capturePanel?.isVisible == true {
                 if Int(event.keyCode) == kVK_Escape {
-                    self.capturePanel?.orderOut(nil)
+                    self.closeCapture()
                     return nil
                 }
                 return event
