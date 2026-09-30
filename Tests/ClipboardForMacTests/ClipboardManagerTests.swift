@@ -65,6 +65,23 @@ final class ClipboardManagerTests: XCTestCase {
         XCTAssertEqual(restored?.first, file)
     }
 
+    func testRecordedVideoAppearsInHistoryAndCanBeCopied() throws {
+        let (manager, board, directory) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let movie = directory.appendingPathComponent("Recording.mov")
+        try Data("movie".utf8).write(to: movie)
+
+        manager.addRecordedVideo(at: movie)
+        let entry = try XCTUnwrap(manager.entries.first)
+        XCTAssertEqual(entry.title, "Recording.mov")
+        let reloaded = ClipboardManager(pasteboard: board, storageDirectory: directory)
+        let restoredEntry = try XCTUnwrap(reloaded.entries.first)
+        reloaded.select(restoredEntry)
+        let copied = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        XCTAssertEqual(copied?.first, movie)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: movie.path))
+    }
+
     func testImageRoundTrip() throws {
         let (manager, board, directory) = try makeFixture()
         defer { try? FileManager.default.removeItem(at: directory) }

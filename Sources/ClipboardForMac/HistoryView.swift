@@ -154,6 +154,12 @@ struct HistoryView: View {
             if inside { manager.selectedID = entry.id }
         }
         .accessibilityElement(children: .contain)
+        .contextMenu {
+            if let url = entry.fileURLs?.first.flatMap(URL.init(string:)),
+               ["mov", "mp4"].contains(url.pathExtension.lowercased()) {
+                Button("Finderで表示") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            }
+        }
     }
 
     @ViewBuilder
@@ -199,7 +205,7 @@ struct HistoryView: View {
             }
             Spacer()
             Menu {
-                Button("範囲を撮影（⌥⇧S）") { manager.onScreenshotRequest?() }
+                Button("画面を撮影・録画（⌥⇧S）") { manager.onScreenshotRequest?() }
                 Divider()
                 Toggle("ログイン時に起動", isOn: Binding(
                     get: { manager.launchAtLogin },

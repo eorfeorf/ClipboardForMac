@@ -24,7 +24,7 @@ private let hotKeyHandler: EventHandlerUPP = { _, event, pointer in
     Task { @MainActor in
         switch hotKeyID.id {
         case 1: delegate.togglePanel()
-        case 2: delegate.startScreenshotSelection()
+        case 2: delegate.toggleCapture()
         default: break
         }
     }
@@ -46,10 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenshotHotKey: EventHotKeyRef?
     private var hotKeyEventHandler: EventHandlerRef?
     private var screenshotProcess: Process?
+    private var capturePanel: NSPanel?
+    private let regionSelector = RegionSelector()
+    private let recorder = ScreenRecorder()
     private var keyboardMonitor: Any?
     private var activationObserver: Any?
     private var deactivationObserver: Any?
     private var previousAppPID: pid_t?
+    private var terminateAfterRecording = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -74,7 +78,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in self?.panel?.orderOut(nil) }
         }
         manager.onSelect = { [weak self] in self?.finishSelection() }
-        manager.onScreenshotRequest = { [weak self] in self?.startScreenshotSelection() }
+        manager.onScreenshotRequest = { [weak self] in self?.toggleCapture() }
+        recorder.onRecordingChanged = { [weak self] active in
+            guard let button = self?.statusItem?.button else { return }
+            button.image = NSImage(systemSymbolName: active ? "stop.circle.fill" : "doc.on.clipboard",
+                                   accessibilityDescription: active ? "録画を停止" : "クリップボード履歴")
+            button.image?.isTemplate = true
+            button.toolTip = active ? "録画中 · クリックまたは ⌥⇧S で停止" : "履歴 ⌥V · 撮影 ⌥⇧S"
+        }
+        recorder.onSaved = { [weak self] url in
+            self?.manager.addRecordedVideo(at: url)
+            if self?.terminateAfterRecording == true { NSApp.reply(toApplicationShouldTerminate: true) }
+        }
+        recorder.onError = { [weak self] message in
+            guard let self else { return }
+            self.manager.errorMessage = message
+            if self.terminateAfterRecording {
+                NSApp.reply(toApplicationShouldTerminate: true)
+            } else if self.panel?.isVisible != true {
+                self.togglePanel()
+            }
+        }
         manager.startMonitoring()
         screenshotMonitor = ScreenshotMonitor(
             onAccessError: { [weak self] _ in
@@ -90,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         screenshotMonitor?.stop()
+        regionSelector.cancel()
         manager.stopMonitoring()
         if let hotKey { UnregisterEventHotKey(hotKey) }
         if let screenshotHotKey { UnregisterEventHotKey(screenshotHotKey) }
@@ -99,8 +124,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let deactivationObserver { NotificationCenter.default.removeObserver(deactivationObserver) }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if recorder.isRecording || recorder.isFinishing {
+            terminateAfterRecording = true
+            if recorder.isRecording { recorder.stop() }
+            return .terminateLater
+        }
+        return .terminateNow
+    }
+
     @objc private func togglePanelFromStatusItem() {
-        togglePanel()
+        if recorder.isRecording { recorder.stop() }
+        else if !recorder.isFinishing { togglePanel() }
     }
 
     func togglePanel() {
@@ -122,13 +157,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
-    func startScreenshotSelection() {
-        guard screenshotProcess == nil else { return }
-        if panel?.isVisible == true { closePanel(restoreFocus: true) }
+    func toggleCapture() {
+        if recorder.isRecording { recorder.stop(); return }
+        if recorder.isFinishing { return }
+        if regionSelector.isSelecting { regionSelector.cancel(); return }
+        if capturePanel?.isVisible == true {
+            capturePanel?.orderOut(nil)
+            return
+        }
+        panel?.orderOut(nil)
+        let capturePanel = makeCapturePanel()
+        capturePanel.contentView = NSHostingView(rootView: CaptureView(
+            capture: { [weak self] kind, mode in self?.beginCapture(kind: kind, mode: mode) },
+            cancel: { [weak self] in self?.capturePanel?.orderOut(nil) }
+        ))
+        capturePanel.center()
+        capturePanel.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+    }
 
+    private func beginCapture(kind: CaptureKind, mode: CaptureMode) {
+        capturePanel?.orderOut(nil)
+        if kind == .video {
+            if mode == .region {
+                regionSelector.begin { [weak self] screen, region in
+                    self?.recorder.record(screen: screen, region: region)
+                }
+            } else {
+                recorder.pick(mode)
+            }
+            return
+        }
+        startScreenshot(mode)
+    }
+
+    private func startScreenshot(_ mode: CaptureMode) {
+        guard screenshotProcess == nil else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-i", "-s", "-c"]
+        switch mode {
+        case .region: process.arguments = ["-i", "-s", "-c"]
+        case .window: process.arguments = ["-i", "-w", "-c"]
+        case .display:
+            let screenIndex = NSScreen.screens.firstIndex(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? 0
+            process.arguments = ["-c", "-D", String(screenIndex + 1)]
+        }
         process.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.screenshotProcess = nil
@@ -149,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "クリップボード履歴")
             button.image?.isTemplate = true
-            button.toolTip = "履歴 ⌥V · 範囲撮影 ⌥⇧S"
+            button.toolTip = "履歴 ⌥V · 撮影 ⌥⇧S"
             button.target = self
             button.action = #selector(togglePanelFromStatusItem)
         }
@@ -173,6 +246,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         created.hidesOnDeactivate = true
         panel = created
+        return created
+    }
+
+    private func makeCapturePanel() -> NSPanel {
+        if let capturePanel { return capturePanel }
+        let created = FloatingClipboardPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 354, height: 142),
+            styleMask: [.borderless], backing: .buffered, defer: false
+        )
+        created.backgroundColor = .clear
+        created.isOpaque = false
+        created.hasShadow = true
+        created.isFloatingPanel = true
+        created.hidesOnDeactivate = true
+        created.level = .floating
+        created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        capturePanel = created
         return created
     }
 
@@ -207,7 +297,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installKeyboardHandling() {
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel?.isVisible == true else { return event }
+            guard let self else { return event }
+            if self.regionSelector.isSelecting, Int(event.keyCode) == kVK_Escape {
+                self.regionSelector.cancel()
+                return nil
+            }
+            if self.capturePanel?.isVisible == true {
+                if Int(event.keyCode) == kVK_Escape {
+                    self.capturePanel?.orderOut(nil)
+                    return nil
+                }
+                return event
+            }
+            guard self.panel?.isVisible == true else { return event }
             switch Int(event.keyCode) {
             case kVK_Escape:
                 self.closePanel(restoreFocus: true)

@@ -218,6 +218,14 @@ final class ClipboardManager: ObservableObject {
         return addImage(png)
     }
 
+    func addRecordedVideo(at url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            errorMessage = "録画ファイルを読み込めませんでした。"
+            return
+        }
+        addEntry(kind: .files, payload: url.absoluteString, fileURLs: [url.absoluteString])
+    }
+
     nonisolated private static func pngData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
