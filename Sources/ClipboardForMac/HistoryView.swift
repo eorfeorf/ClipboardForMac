@@ -201,7 +201,7 @@ struct HistoryView: View {
     private var footer: some View {
         HStack {
             if !manager.canAutoPaste {
-                Button("自動貼り付けを許可") { manager.requestAccessibility() }
+                Button("自動貼り付けを有効にする") { manager.requestAccessibility() }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
             }
@@ -210,6 +210,10 @@ struct HistoryView: View {
                 Button("画面を撮影・録画（⌥⇧S）") { manager.onScreenshotRequest?() }
                 Divider()
                 Menu("設定") {
+                    if !manager.canAutoPaste {
+                        Button("自動貼り付けを有効にする…") { manager.requestAccessibility() }
+                        Divider()
+                    }
                     screenshotLocationButton(.system, title: "スクリーンショット：macOSと同じ")
                     screenshotLocationButton(.desktop, title: "スクリーンショット：デスクトップ")
                     if let folder = screenshotPreferences.customDirectory {

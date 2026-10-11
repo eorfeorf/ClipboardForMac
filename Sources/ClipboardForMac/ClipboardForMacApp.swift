@@ -67,10 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             let pid = app.processIdentifier
-            Task { @MainActor [weak self] in self?.previousAppPID = pid }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if pid == ProcessInfo.processInfo.processIdentifier {
+                    self.manager.refreshPermissions()
+                } else {
+                    self.previousAppPID = pid
+                }
+            }
         }
         deactivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
@@ -422,13 +428,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishSelection() {
         let target = previousAppPID
+        let selectedChangeCount = NSPasteboard.general.changeCount
         panel?.orderOut(nil)
         guard let target,
               let application = NSRunningApplication(processIdentifier: target) else { return }
-        guard application.activate() else { return }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != target {
+            _ = application.activate()
+        }
+        manager.refreshPermissions()
         guard AXIsProcessTrusted() else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target else { return }
+        Task { @MainActor in
+            guard await PasteTarget.waitUntilFrontmost(target) else { return }
+            guard NSPasteboard.general.changeCount == selectedChangeCount else { return }
             let source = CGEventSource(stateID: .hidSystemState)
             let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true)
             let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
