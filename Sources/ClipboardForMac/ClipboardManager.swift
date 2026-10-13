@@ -7,9 +7,13 @@ import ServiceManagement
 final class ClipboardManager: ObservableObject {
     @Published private(set) var entries: [ClipboardEntry] = []
     @Published var query = "" {
-        didSet { selectedID = filteredEntries.first?.id }
+        didSet {
+            selectedID = filteredEntries.first?.id
+            if selectedID != nil { scrollSelectionRequest += 1 }
+        }
     }
     @Published var selectedID: UUID?
+    @Published private(set) var scrollSelectionRequest = 0
     @Published private(set) var canAutoPaste = AXIsProcessTrusted()
     @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var errorMessage: String?
@@ -91,7 +95,10 @@ final class ClipboardManager: ObservableObject {
         guard !visible.isEmpty else { selectedID = nil; return }
         let current = visible.firstIndex { $0.id == selectedID } ?? (offset > 0 ? -1 : 0)
         let next = max(0, min(visible.count - 1, current + offset))
-        selectedID = visible[next].id
+        let nextID = visible[next].id
+        guard selectedID != nextID else { return }
+        selectedID = nextID
+        scrollSelectionRequest += 1
     }
 
     func selectCurrent() {

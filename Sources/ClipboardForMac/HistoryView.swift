@@ -83,8 +83,8 @@ struct HistoryView: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
             }
-            .onChange(of: manager.selectedID) { _, id in
-                guard let id else { return }
+            .onChange(of: manager.scrollSelectionRequest) { _, _ in
+                guard let id = manager.selectedID else { return }
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo(id, anchor: .center)
                 }
